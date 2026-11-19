@@ -1,0 +1,4 @@
+# Core requirements for RDR2-MCP server
+# Standard library is used for zero-dependency portability where possible!
+# Pillow is optional for advanced screenshot processing:
+pillow>=10.0.0

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "rdr2": {
+      "command": "py",
+      "args": [
+        "C:\\Users\\<YourUsername>\\Documents\\antigravity\\rdr2-mcp\\mcp_server\\server.py"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}
