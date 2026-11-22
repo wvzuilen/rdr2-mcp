@@ -92,7 +92,7 @@ LANDMARKS: Dict[str, Dict[str, Any]] = {
     "big valley cougar": {"name": "Big Valley Cougar Spawn", "x": -2750.0, "y": -50.0, "z": 155.0, "region": "Big Valley"},
     "lake owanjila": {"name": "Lake Owanjila (Beaver Shore)", "x": -2615.0, "y": -385.0, "z": 147.0, "region": "Big Valley"},
     "beaver": {"name": "Lake Owanjila (Beaver Shore)", "x": -2615.0, "y": -385.0, "z": 147.0, "region": "Big Valley"},
-    "riggs station trapper": {"name": "Riggs Station Trapper", "x": -1325.0, "y": -1275.0, "z": 120.0, "region": "Big Valley"},
+    "riggs station trapper": {"name": "Riggs Station Trapper", "x": -1003.0, "y": -547.0, "z": 99.0, "region": "Big Valley"},
     "roanoke ridge trapper": {"name": "Roanoke Ridge Trapper", "x": 2340.0, "y": 1580.0, "z": 200.0, "region": "Roanoke Ridge"},
     "annesburg cougar": {"name": "Annesburg North Cougar Spawn", "x": 2880.0, "y": 1620.0, "z": 102.0, "region": "Roanoke Ridge"},
     "tall trees trapper": {"name": "Tall Trees Trapper", "x": -1990.0, "y": -1860.0, "z": 75.0, "region": "Tall Trees"},

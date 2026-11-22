@@ -10,8 +10,10 @@ import logging
 from typing import Dict, Any, List
 
 from bridge import RDR2Bridge, LANDMARKS
+from camp_upgrades import format_camp_upgrades, CAMP_UPGRADE_CATALOG
 from challenges import format_challenges, CHALLENGE_CATALOG
 from encyclopedia import query_encyclopedia
+from trinkets import format_trinkets, TRINKETS_CATALOG
 
 
 # Set up logging to stderr (stdout is reserved for JSON-RPC messages)
@@ -75,6 +77,30 @@ TOOLS = [
                         "all", "bandit", "explorer", "gambler", "herbalist",
                         "horseman", "master_hunter", "sharpshooter", "survivalist", "weapons_expert"
                     ]
+                }
+            },
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "rdr2_camp_upgrades",
+        "description": "Retrieves live Story Mode Camp Ledger upgrade status (Lodging / Fast Travel Map, Provisions, Medicine, Munitions, Leather Working Tools, Horse Station, Chicken Coop, Boat), including purchased tiers, next tier prices, and remaining total cost.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "rdr2_trinkets",
+        "description": "Retrieves live ownership status of all 25 Story Mode Trinkets & Talismans, active passive bonuses, missing items with sources, and rare talisman crafting ingredients currently in Arthur's satchel.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "filter": {
+                    "type": "string",
+                    "description": "Optional filter: 'all' (default), 'owned', 'missing', 'talismans', or 'trinkets'.",
+                    "enum": ["all", "owned", "missing", "talismans", "trinkets"]
                 }
             },
             "additionalProperties": False
@@ -209,6 +235,47 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Any:
                 "Restart Red Dead Redemption 2 so the updated RDR2_MCP_Bridge.asi is loaded."
             ),
             "known_categories": list(CHALLENGE_CATALOG.keys()),
+        }
+
+    elif name == "rdr2_camp_upgrades":
+        status = bridge.get_full_status()
+        if not status.get("running"):
+            return status
+
+        telemetry = status.get("telemetry")
+        if isinstance(telemetry, dict) and isinstance(telemetry.get("camp_upgrades"), dict):
+            return format_camp_upgrades(telemetry["camp_upgrades"])
+
+        return {
+            "status": "Game is running",
+            "mode": status.get("bridge_mode"),
+            "camp_upgrades_available": False,
+            "note": (
+                "Live camp upgrade telemetry is not present in the currently loaded RDR2_MCP_Bridge.asi. "
+                "Restart Red Dead Redemption 2 so the updated RDR2_MCP_Bridge.asi is loaded."
+            ),
+            "known_upgrades": list(CAMP_UPGRADE_CATALOG.keys()),
+        }
+
+    elif name == "rdr2_trinkets":
+        filter_mode = arguments.get("filter", "all")
+        status = bridge.get_full_status()
+        if not status.get("running"):
+            return status
+
+        telemetry = status.get("telemetry")
+        if isinstance(telemetry, dict) and isinstance(telemetry.get("trinkets"), dict):
+            return format_trinkets(telemetry["trinkets"], filter_mode)
+
+        return {
+            "status": "Game is running",
+            "mode": status.get("bridge_mode"),
+            "trinkets_available": False,
+            "note": (
+                "Live trinkets & talismans telemetry is not present in the currently loaded RDR2_MCP_Bridge.asi. "
+                "Restart Red Dead Redemption 2 so the updated RDR2_MCP_Bridge.asi is loaded."
+            ),
+            "total_catalog_items": len(TRINKETS_CATALOG),
         }
 
     elif name == "rdr2_capture_screen":

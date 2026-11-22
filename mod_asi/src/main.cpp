@@ -34,6 +34,7 @@ typedef void (*fn_scriptWait_t)(DWORD);
 typedef void (*fn_nativeInit_t)(UINT64);
 typedef void (*fn_nativePush64_t)(UINT64);
 typedef UINT64* (*fn_nativeCall_t)();
+typedef UINT64* (*fn_getGlobalPtr_t)(int);
 
 static fn_scriptRegister_t   fn_scriptRegister   = nullptr;
 static fn_scriptUnregister_t fn_scriptUnregister = nullptr;
@@ -42,6 +43,7 @@ static fn_scriptWait_t       fn_realScriptWait   = nullptr;
 static fn_nativeInit_t       fn_nativeInit       = nullptr;
 static fn_nativePush64_t     fn_nativePush64     = nullptr;
 static fn_nativeCall_t       fn_nativeCall       = nullptr;
+static fn_getGlobalPtr_t     fn_getGlobalPtr     = nullptr;
 
 static HMODULE          g_hModule = nullptr;
 static volatile LONG    g_running = 1;
@@ -459,6 +461,120 @@ static const ChallengeGoal CHALLENGE_GOALS[] = {
     {8, 10, "ACW_WEAP_RANK_10_BEAR"}
 };
 
+static int ReadGlobalInt(int globalId) {
+    if (!fn_getGlobalPtr) return -1;
+    UINT64* ptr = fn_getGlobalPtr(globalId);
+    if (!ptr) return -1;
+    return (int)(int64_t)(*ptr);
+}
+
+static void BuildCampUpgradesJson(char* out_buf, size_t out_size) {
+    // Verified from RDR2 1491.50 camp_horseshoeoverlook.ysc (Global_40.f_4283.f_313..f_322)
+    // Raw script values are 1-based (1 = base/unpurchased, 2 = Tier 1, 3 = Tier 2, 4 = Tier 3)
+    const int BASE = 40 + 4283;
+    int raw_chickens = ReadGlobalInt(BASE + 313);
+    int raw_boat     = ReadGlobalInt(BASE + 314);
+    int raw_leather  = ReadGlobalInt(BASE + 315);
+    int raw_prov     = ReadGlobalInt(BASE + 318);
+    int raw_med      = ReadGlobalInt(BASE + 319);
+    int raw_ammo     = ReadGlobalInt(BASE + 320);
+    int raw_lodging  = ReadGlobalInt(BASE + 321);
+    int raw_horse    = ReadGlobalInt(BASE + 322);
+
+    auto to_level = [](int raw, int max_lvl) -> int {
+        if (raw <= 1) return 0;
+        int lvl = raw - 1;
+        return lvl > max_lvl ? max_lvl : lvl;
+    };
+
+    snprintf(out_buf, out_size,
+        "{"
+        "\"available\":%s,"
+        "\"lodging\":{\"level\":%d,\"max_level\":3,\"raw\":%d},"
+        "\"provisions\":{\"level\":%d,\"max_level\":3,\"raw\":%d},"
+        "\"medicine\":{\"level\":%d,\"max_level\":3,\"raw\":%d},"
+        "\"munitions\":{\"level\":%d,\"max_level\":3,\"raw\":%d},"
+        "\"leather_working_tools\":{\"level\":%d,\"max_level\":1,\"raw\":%d},"
+        "\"horse_station\":{\"level\":%d,\"max_level\":1,\"raw\":%d},"
+        "\"chicken_coop\":{\"level\":%d,\"max_level\":1,\"raw\":%d},"
+        "\"boat\":{\"level\":%d,\"max_level\":1,\"raw\":%d}"
+        "}",
+        (fn_getGlobalPtr != nullptr && raw_lodging >= 0) ? "true" : "false",
+        to_level(raw_lodging, 3), raw_lodging,
+        to_level(raw_prov, 3), raw_prov,
+        to_level(raw_med, 3), raw_med,
+        to_level(raw_ammo, 3), raw_ammo,
+        to_level(raw_leather, 1), raw_leather,
+        to_level(raw_horse, 1), raw_horse,
+        to_level(raw_chickens, 1), raw_chickens,
+        to_level(raw_boat, 1), raw_boat
+    );
+}
+
+struct TrinketQuery {
+    const char* key;
+    const char* item_id;
+};
+
+static const TrinketQuery TRINKETS_TABLE[] = {
+    // 6 Talismans
+    {"alligator_tooth_talisman", "PROVISION_TALISMAN_ALLIGATOR_TOOTH"},
+    {"bear_claw_talisman",       "PROVISION_TALISMAN_BEAR_CLAW"},
+    {"bison_horn_talisman",      "PROVISION_TALISMAN_BUFFALO_HORN"},
+    {"boar_tusk_talisman",       "PROVISION_TALISMAN_BOAR_TUSK"},
+    {"raven_claw_talisman",      "PROVISION_TALISMAN_RAVEN_CLAW"},
+    {"eagle_talon_talisman",     "PROVISION_TALISMAN_EAGLE_TALON"},
+    // 13 Craftable Legendary Animal Trinkets
+    {"beaver_tooth_trinket",       "PROVISION_TRINKET_BEAVER_TOOTH"},
+    {"buck_antler_trinket",        "PROVISION_TRINKET_BUCK_ANTLER"},
+    {"cougar_fang_trinket",        "PROVISION_TRINKET_COUGAR_FANG"},
+    {"coyote_fang_trinket",        "PROVISION_TRINKET_COYOTE_FANG"},
+    {"elk_antler_trinket",         "PROVISION_TRINKET_ELK_ANTLER"},
+    {"fox_claw_trinket",           "PROVISION_TRINKET_FOX_CLAW"},
+    {"lion_paw_trinket",           "PROVISION_TRINKET_LION_PAW"},
+    {"moose_antler_trinket",       "PROVISION_TRINKET_MOOSE_ANTLER"},
+    {"panther_eye_trinket",        "PROVISION_TRINKET_PANTHER_EYE"},
+    {"pronghorn_horn_trinket",     "PROVISION_TRINKET_PRONGHORN_ANTLER"},
+    {"ram_horn_trinket",           "PROVISION_TRINKET_RAM_HORN"},
+    {"tatanka_bison_horn_trinket", "PROVISION_TRINKET_BISON_HORN"},
+    {"wolf_heart_trinket",         "PROVISION_TRINKET_WOLF_HEART"},
+    // 6 World-Found / Quest Trinkets
+    {"cat_eye_trinket",      "PROVISION_TRINKET_CAT_EYE"},
+    {"crow_beak_trinket",    "PROVISION_TRINKET_CROW_BEAK"},
+    {"hawk_talon_trinket",   "PROVISION_TRINKET_HAWK_TALON"},
+    {"owl_feather_trinket",  "PROVISION_TRINKET_OWL_FEATHER"},
+    {"shark_tooth_trinket",  "PROVISION_TRINKET_SHARK_TOOTH"},
+    {"turtle_shell_trinket", "PROVISION_TRINKET_TURTLE_SHELL"}
+};
+
+static const TrinketQuery TALISMAN_INGREDIENTS_TABLE[] = {
+    {"silver_chain_bracelet",       "PROVISION_BRACELET_SILVER"},
+    {"quartz_chunk",                "PROVISION_RC_QUARTZ_CHUNK"},
+    {"gold_jointed_bracelet",       "PROVISION_BRACELET_GOLD"},
+    {"vintage_civil_war_handcuffs", "PROVISION_CC_VINTAGE_HANDCUFFS"},
+    {"abalone_shell_fragment",      "PROVISION_RS_ABALONE_SHELL_FRAGMENT"},
+    {"silver_earring",              "PROVISION_EARRING_SILVER"},
+    {"gold_earring",                "PROVISION_EARRING_GOLD"},
+    {"cobalt_petrified_wood",       "PROVISION_RF_WOOD_COBALT"},
+    {"old_brass_compass",           "PROVISION_TH_ANTIQUE_BRASS_COMPASS"}
+};
+
+static void BuildTrinketsJson(int inv_id, char* out_buf, size_t out_size) {
+    int pos = snprintf(out_buf, out_size, "{\"owned\":{");
+    size_t t_count = sizeof(TRINKETS_TABLE) / sizeof(TRINKETS_TABLE[0]);
+    for (size_t i = 0; i < t_count && pos < (int)out_size - 96; ++i) {
+        int qty = call_int_3(0xE787F05DFC977BDEULL, (UINT64)inv_id, (UINT64)joaat(TRINKETS_TABLE[i].item_id), 0);
+        pos += snprintf(out_buf + pos, out_size - pos, "%s\"%s\":%d", i == 0 ? "" : ",", TRINKETS_TABLE[i].key, qty);
+    }
+    pos += snprintf(out_buf + pos, out_size - pos, "},\"ingredients\":{");
+    size_t ing_count = sizeof(TALISMAN_INGREDIENTS_TABLE) / sizeof(TALISMAN_INGREDIENTS_TABLE[0]);
+    for (size_t i = 0; i < ing_count && pos < (int)out_size - 64; ++i) {
+        int qty = call_int_3(0xE787F05DFC977BDEULL, (UINT64)inv_id, (UINT64)joaat(TALISMAN_INGREDIENTS_TABLE[i].item_id), 0);
+        pos += snprintf(out_buf + pos, out_size - pos, "%s\"%s\":%d", i == 0 ? "" : ",", TALISMAN_INGREDIENTS_TABLE[i].key, qty);
+    }
+    snprintf(out_buf + pos, out_size - pos, "}}");
+}
+
 static void BuildChallengesJson(char* out_buf, size_t out_size) {
     int pos = snprintf(out_buf, out_size, "{");
     size_t cat_count = sizeof(CHALLENGE_CATEGORIES) / sizeof(CHALLENGE_CATEGORIES[0]);
@@ -815,10 +931,14 @@ static void TickTelemetryOnce() {
             }
             snprintf(inv_json + ipos, sizeof(inv_json) - ipos, "}");
 
-            // Challenges progress (refreshed every ~1s = 5 ticks to keep frame overhead near zero)
+            // Challenges, Camp Upgrades & Trinkets (refreshed every ~1s = 5 ticks)
             static char challenges_json[4096] = "{}";
+            static char camp_upgrades_json[1024] = "{\"available\":false}";
+            static char trinkets_json[2048] = "{\"owned\":{},\"ingredients\":{}}";
             if (g_chal_refresh_ticks == 0 || ++g_chal_refresh_ticks >= 5) {
                 BuildChallengesJson(challenges_json, sizeof(challenges_json));
+                BuildCampUpgradesJson(camp_upgrades_json, sizeof(camp_upgrades_json));
+                BuildTrinketsJson(inv_id, trinkets_json, sizeof(trinkets_json));
                 g_chal_refresh_ticks = 1;
             }
 
@@ -869,7 +989,9 @@ static void TickTelemetryOnce() {
                 "    \"waypoint_active\": %s,\n"
                 "    \"waypoint_coords\": {\"x\": %.2f, \"y\": %.2f}\n"
                 "  },\n"
-                "  \"challenges\": %s\n"
+                "  \"challenges\": %s,\n"
+                "  \"camp_upgrades\": %s,\n"
+                "  \"trinkets\": %s\n"
                 "}",
                 px, py, pz,
                 heading,
@@ -896,7 +1018,9 @@ static void TickTelemetryOnce() {
                 state_hash, town_hash, district_hash,
                 wp_active ? "true" : "false",
                 wpx, wpy,
-                challenges_json
+                challenges_json,
+                camp_upgrades_json,
+                trinkets_json
             );
     }
 
@@ -939,6 +1063,7 @@ static bool ResolveScriptHook() {
     fn_nativeInit       = (fn_nativeInit_t)      GetProcAddress(hSH, "?nativeInit@@YAX_K@Z");
     fn_nativePush64     = (fn_nativePush64_t)    GetProcAddress(hSH, "?nativePush64@@YAX_K@Z");
     fn_nativeCall       = (fn_nativeCall_t)      GetProcAddress(hSH, "?nativeCall@@YAPEA_KXZ");
+    fn_getGlobalPtr     = (fn_getGlobalPtr_t)    GetProcAddress(hSH, "?getGlobalPtr@@YAPEA_KH@Z");
 
     return (fn_scriptRegister && fn_scriptUnregister && fn_scriptWait &&
             fn_nativeInit && fn_nativePush64 && fn_nativeCall);
