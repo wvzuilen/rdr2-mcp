@@ -200,6 +200,75 @@ class RDR2Bridge:
         self.http_url = f"http://127.0.0.1:{self.port}"
         self.last_known_pid = None
         self.last_known_hwnd = None
+        self._rva_cache: Dict[Tuple[int, int], Dict[str, int]] = {}
+
+    def _read_proc_bytes(self, h_proc: Any, addr: int, size: int) -> Optional[bytes]:
+        buf = ctypes.create_string_buffer(size)
+        bytes_read = ctypes.c_size_t(0)
+        ok = _k32_mem.ReadProcessMemory(
+            h_proc,
+            ctypes.c_void_p(addr),
+            buf,
+            size,
+            ctypes.byref(bytes_read),
+        )
+        if not ok or bytes_read.value < size:
+            return None
+        return buf.raw[:size]
+
+    def _resolve_bridge_rvas(self, h_proc: Any, pid: int, base: int) -> Dict[str, int]:
+        """Resolve exported symbol RVAs from the loaded RDR2_MCP_Bridge.asi PE Export Directory,
+        falling back to legacy hardcoded RVAs for older pre-export builds."""
+        cache_key = (pid, base)
+        if cache_key in self._rva_cache:
+            return self._rva_cache[cache_key]
+
+        rvas = {
+            "g_json_buf": ASI_RVA_JSON_BUF,
+            "g_wp_x": ASI_RVA_WP_X,
+            "g_wp_y": ASI_RVA_WP_Y,
+            "g_wp_z": ASI_RVA_WP_Z,
+            "g_pending_wp": ASI_RVA_PENDING_WP,
+        }
+        try:
+            hdr = self._read_proc_bytes(h_proc, base, 0x1000)
+            if hdr and hdr[:2] == b"MZ":
+                pe_off = struct.unpack_from("<I", hdr, 0x3C)[0]
+                if pe_off + 0x100 <= len(hdr) and hdr[pe_off:pe_off + 4] == b"PE\x00\x00":
+                    opt_off = pe_off + 24
+                    magic = struct.unpack_from("<H", hdr, opt_off)[0]
+                    dd_off = opt_off + (112 if magic == 0x20B else 96)
+                    exp_rva, exp_size = struct.unpack_from("<II", hdr, dd_off)
+                    if exp_rva and exp_size:
+                        exp_dir = self._read_proc_bytes(h_proc, base + exp_rva, 40)
+                        if exp_dir:
+                            num_names, = struct.unpack_from("<I", exp_dir, 24)
+                            addr_rva, name_rva, ord_rva = struct.unpack_from("<III", exp_dir, 28)
+                            if 0 < num_names <= 2048:
+                                names_tbl = self._read_proc_bytes(h_proc, base + name_rva, num_names * 4)
+                                ords_tbl = self._read_proc_bytes(h_proc, base + ord_rva, num_names * 2)
+                                if names_tbl and ords_tbl:
+                                    wanted = set(rvas.keys())
+                                    found: Dict[str, int] = {}
+                                    for i in range(num_names):
+                                        nrva = struct.unpack_from("<I", names_tbl, i * 4)[0]
+                                        raw_name = self._read_proc_bytes(h_proc, base + nrva, 32)
+                                        if not raw_name:
+                                            continue
+                                        nul = raw_name.find(b"\x00")
+                                        sym = (raw_name[:nul] if nul != -1 else raw_name).decode("ascii", errors="ignore")
+                                        if sym in wanted:
+                                            ord_idx = struct.unpack_from("<H", ords_tbl, i * 2)[0]
+                                            frva_bytes = self._read_proc_bytes(h_proc, base + addr_rva + ord_idx * 4, 4)
+                                            if frva_bytes:
+                                                found[sym] = struct.unpack("<I", frva_bytes)[0]
+                                    if found:
+                                        rvas.update(found)
+        except Exception:
+            pass
+
+        self._rva_cache[cache_key] = rvas
+        return rvas
 
     def _enrich_telemetry(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Decode zone hashes, weapon fallback hashes, and nearest landmark."""
@@ -274,11 +343,12 @@ class RDR2Bridge:
             return None
         try:
             base = self._find_bridge_module_base(pid)
+            rvas = self._resolve_bridge_rvas(h_proc, pid, base)
             buf = ctypes.create_string_buffer(16384)
             bytes_read = ctypes.c_size_t(0)
             ok = _k32_mem.ReadProcessMemory(
                 h_proc,
-                ctypes.c_void_p(base + ASI_RVA_JSON_BUF),
+                ctypes.c_void_p(base + rvas["g_json_buf"]),
                 buf,
                 16384,
                 ctypes.byref(bytes_read),
@@ -318,12 +388,13 @@ class RDR2Bridge:
 
         try:
             base = self._find_bridge_module_base(pid)
+            rvas = self._resolve_bridge_rvas(h_proc, pid, base)
             written = ctypes.c_size_t(0)
             writes = [
-                (base + ASI_RVA_WP_X, struct.pack("<f", float(x))),
-                (base + ASI_RVA_WP_Y, struct.pack("<f", float(y))),
-                (base + ASI_RVA_WP_Z, struct.pack("<f", float(z))),
-                (base + ASI_RVA_PENDING_WP, struct.pack("<i", 1)),
+                (base + rvas["g_wp_x"], struct.pack("<f", float(x))),
+                (base + rvas["g_wp_y"], struct.pack("<f", float(y))),
+                (base + rvas["g_wp_z"], struct.pack("<f", float(z))),
+                (base + rvas["g_pending_wp"], struct.pack("<i", 1)),
             ]
             for addr, payload in writes:
                 c_buf = ctypes.create_string_buffer(payload, len(payload))
@@ -346,7 +417,7 @@ class RDR2Bridge:
                 time.sleep(0.06)
                 if _k32_mem.ReadProcessMemory(
                     h_proc,
-                    ctypes.c_void_p(base + ASI_RVA_PENDING_WP),
+                    ctypes.c_void_p(base + rvas["g_pending_wp"]),
                     pending_buf,
                     4,
                     ctypes.byref(bytes_read),

@@ -18,6 +18,7 @@
 ## 🌟 Features
 
 * **⚡ Real-Time Player Telemetry:** Live query of Arthur's world coordinates (`x, y, z`), heading, region/town & nearest landmark, health/stamina/dead-eye cores & ranks, cash balance, bounty & wanted level, active & owned weapons (including ammo & arrow counts), and trinkets/tonics/herbs inventory.
+* **🏆 Live Challenge Tracking (`rdr2_challenges`):** Tracks all 9 Story Mode challenge categories (90 ranks total — Bandit, Explorer, Gambler, Herbalist, Horseman, Master Hunter, Sharpshooter, Survivalist, Weapons Expert) with completed ranks, active rank objective, live integer progress counters, and multi-subgoal breakdowns.
 * **🐴 Horse Tracking:** Monitor your active horse's spawn & mounted status, model hash, distance to Arthur, health/stamina cores & values, and bonding rank.
 * **🗺️ World & Environment:** Read in-game clock time, ambient temperature (`°C`), active state/town/district names, and active waypoint status.
 * **🧭 In-Game GPS Waypoints (`rdr2_set_waypoint`):** Programmatically place an in-game red GPS Multi-Route directly onto the minimap and world map using exact coordinates or built-in named landmarks (towns, Fences, Trappers, and notable locations).
@@ -67,6 +68,7 @@
 | `rdr2_player_state` | Retrieves Arthur's live coordinates, heading, region, nearest landmark, cores/ranks, cash, bounty/wanted status, weapons, ammo, and inventory. |
 | `rdr2_horse_state` | Retrieves the active horse's mounted state, distance, health, stamina, model hash, and bonding rank. |
 | `rdr2_world_info` | Retrieves the in-game clock time, temperature (`°C`), state/town/district, and waypoint state. |
+| `rdr2_challenges` | Retrieves live Story Mode challenge progress across all 9 categories (completed ranks, active objective, live progress counters, and sub-goal completion). |
 | `rdr2_capture_screen` | Captures a live PNG screenshot of the running RDR2 window (saved to `~/.rdr2_mcp/captures` by default). |
 | `rdr2_send_input` | Sends an in-game key action (`whistle`, `calm`, `brush`, `dead_eye`, `map`, `journal`, `satchel`, etc.) via Win32 window messages. |
 | `rdr2_set_waypoint` | Sets an in-game GPS Multi-Route waypoint to custom `(x, y)` coordinates or a named landmark. |

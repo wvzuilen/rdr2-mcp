@@ -10,6 +10,7 @@ import logging
 from typing import Dict, Any, List
 
 from bridge import RDR2Bridge, LANDMARKS
+from challenges import format_challenges, CHALLENGE_CATALOG
 from encyclopedia import query_encyclopedia
 
 
@@ -58,6 +59,24 @@ TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {},
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "rdr2_challenges",
+        "description": "Retrieves live Single-Player Challenge progress across all 9 categories (Bandit, Explorer, Gambler, Herbalist, Horseman, Master Hunter, Sharpshooter, Survivalist, Weapons Expert): completed ranks (0-10), active rank objective, live progress counter, and per-subgoal completion.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Optional challenge category filter (default: 'all').",
+                    "enum": [
+                        "all", "bandit", "explorer", "gambler", "herbalist",
+                        "horseman", "master_hunter", "sharpshooter", "survivalist", "weapons_expert"
+                    ]
+                }
+            },
             "additionalProperties": False
         }
     },
@@ -169,6 +188,27 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Any:
             "process_id": status["process"]["pid"],
             "window": status.get("window", {}),
             "note": "Native telemetry bridge not active. For full live stats, ensure RDR2_MCP_Bridge.asi is in your game root."
+        }
+
+    elif name == "rdr2_challenges":
+        category = arguments.get("category", "all")
+        status = bridge.get_full_status()
+        if not status.get("running"):
+            return status
+
+        telemetry = status.get("telemetry")
+        if isinstance(telemetry, dict) and isinstance(telemetry.get("challenges"), dict):
+            return format_challenges(telemetry["challenges"], category)
+
+        return {
+            "status": "Game is running",
+            "mode": status.get("bridge_mode"),
+            "challenges_available": False,
+            "note": (
+                "Live challenge telemetry is not present in the currently loaded RDR2_MCP_Bridge.asi. "
+                "Restart Red Dead Redemption 2 so the updated RDR2_MCP_Bridge.asi is loaded."
+            ),
+            "known_categories": list(CHALLENGE_CATALOG.keys()),
         }
 
     elif name == "rdr2_capture_screen":

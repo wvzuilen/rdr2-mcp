@@ -55,15 +55,18 @@ static ULONGLONG        g_lastTickMs = 0;
 static bool             g_scriptWaitHooked = false;
 static uint8_t          g_origScriptWaitBytes[16] = {0};
 
-static char g_json_buf[16384] = "{\"bridge\":\"initializing\",\"bridge_active\":true,\"in_game\":false}";
+extern "C" {
+__declspec(dllexport) char g_json_buf[16384] = "{\"bridge\":\"initializing\",\"bridge_active\":true,\"in_game\":false}";
 
-// Pending waypoint command from HTTP POST /waypoint
-static volatile LONG g_pending_wp = 0;
-static float g_wp_x = 0.0f;
-static float g_wp_y = 0.0f;
-static float g_wp_z = 0.0f;
+// Pending waypoint command from HTTP POST /waypoint or direct memory bridge
+__declspec(dllexport) volatile LONG g_pending_wp = 0;
+__declspec(dllexport) float g_wp_x = 0.0f;
+__declspec(dllexport) float g_wp_y = 0.0f;
+__declspec(dllexport) float g_wp_z = 0.0f;
+}
 static bool g_gps_route_active = false;
 static int g_gps_refresh_ticks = 0;
+static int g_chal_refresh_ticks = 0;
 
 static const int SERVER_PORT = 28999;
 
@@ -281,6 +284,224 @@ static const InventoryQuery INVENTORY_TABLE[] = {
     {"creeping_thyme", "CONSUMABLE_HERB_CREEPING_THYME"},
     {"wild_mint", "CONSUMABLE_HERB_WILD_MINT"}
 };
+
+struct ChallengeCategory {
+    const char* key;
+    const char* root_id;
+};
+
+static const ChallengeCategory CHALLENGE_CATEGORIES[] = {
+    {"bandit",         "SP_CHAL_BAND_ROOT"},
+    {"explorer",       "SP_CHAL_EXPL_ROOT"},
+    {"gambler",        "SP_CHAL_GAMB_ROOT"},
+    {"herbalist",      "SP_CHAL_HERB_ROOT"},
+    {"horseman",       "SP_CHAL_HORSE_ROOT"},
+    {"master_hunter",  "SP_CHAL_HUNT_ROOT"},
+    {"sharpshooter",   "SP_CHAL_SHOT_ROOT"},
+    {"survivalist",    "SP_CHAL_SURV_ROOT"},
+    {"weapons_expert", "SP_CHAL_WEAP_ROOT"}
+};
+
+struct ChallengeGoal {
+    uint8_t cat_idx;
+    uint8_t rank;
+    const char* goal_id;
+};
+
+static const ChallengeGoal CHALLENGE_GOALS[] = {
+    // 0: Bandit
+    {0,  1, "ACW_BAND_RANK_01_TOWNSFOLK"},
+    {0,  2, "ACW_BAND_RANK_02_COACHROBBERIES"},
+    {0,  3, "ACW_BAND_RANK_03_SHOPROBBERIES"},
+    {0,  4, "ACW_BAND_RANK_04_COACHESROBBEDINADAY"},
+    {0,  5, "ACW_BAND_RANK_05_HIGHESTBOUNTY"},
+    {0,  6, "ACW_BAND_RANK_06_HORSESFENCED"},
+    {0,  7, "ACW_BAND_RANK_07_STEALCASH"},
+    {0,  8, "ACW_BAND_RANK_08_WAGONSFENCED"},
+    {0,  9, "ACW_BAND_RANK_09_HOGTIEDTRAINTRACKS"},
+    {0, 10, "ACW_BAND_RANK_10_TRAINROBBERIES"},
+    // 1: Explorer
+    {1,  1, "ACW_EXPL_RANK_01_TREASURE"},
+    {1,  2, "ACW_EXPL_RANK_02_TREASURE"},
+    {1,  3, "ACW_EXPL_RANK_03_TREASURE"},
+    {1,  4, "ACW_EXPL_RANK_04_TREASURE"},
+    {1,  5, "ACW_EXPL_RANK_05_TREASURE"},
+    {1,  6, "ACW_EXPL_RANK_06_TREASURE"},
+    {1,  7, "ACW_EXPL_RANK_07_TREASURE"},
+    {1,  8, "ACW_EXPL_RANK_08_TREASURE"},
+    {1,  9, "ACW_EXPL_RANK_09_TREASURE"},
+    {1, 10, "ACW_EXPL_RANK_10_TREASURE"},
+    // 2: Gambler
+    {2,  1, "ACW_GAMB_RANK_01_POKER"},
+    {2,  2, "ACW_GAMB_RANK_02_BLACKJACK"},
+    {2,  3, "ACW_GAMB_RANK_03_FIVEFINGERFILLET"},
+    {2,  4, "ACW_GAMB_RANK_04_POKER_FNS"},
+    {2,  4, "ACW_GAMB_RANK_04_POKER_SDN"},
+    {2,  4, "ACW_GAMB_RANK_04_POKER_VAL"},
+    {2,  5, "ACW_GAMB_RANK_05_DOMINOES"},
+    {2,  6, "ACW_GAMB_RANK_06_BLACKJACK_RHO"},
+    {2,  6, "ACW_GAMB_RANK_06_BLACKJACK_VAN"},
+    {2,  7, "ACW_GAMB_RANK_07_FIVEFINGER_STR"},
+    {2,  7, "ACW_GAMB_RANK_07_FIVEFINGER_VAL"},
+    {2,  7, "ACW_GAMB_RANK_07_FIVEFINGER_VAN"},
+    {2,  8, "ACW_GAMB_RANK_08_BLACKJACK"},
+    {2,  9, "ACW_GAMB_RANK_09_DOMINOES"},
+    {2, 10, "ACW_GAMB_RANK_10_POKERHANDS"},
+    // 3: Herbalist
+    {3,  1, "ACW_HERB_RANK_01_YARROW"},
+    {3,  2, "ACW_HERB_RANK_02_BERRIES"},
+    {3,  3, "ACW_HERB_RANK_03_SAGECRAFTING"},
+    {3,  4, "ACW_HERB_RANK_04_FEEDMUSHROOMS"},
+    {3,  4, "ACW_HERB_RANK_04_POTENTHERBIVOREBAIT"},
+    {3,  5, "ACW_HERB_RANK_05_TOBACCOCRAFTING"},
+    {3,  6, "ACW_HERB_RANK_06_PICKINGHERBS"},
+    {3,  7, "ACW_HERB_RANK_07_CRAFTSPECIALTONIC"},
+    {3,  7, "ACW_HERB_RANK_07_USESPECIALTONIC"},
+    {3,  8, "ACW_HERB_RANK_08_POISONWEAPONS"},
+    {3,  9, "ACW_HERB_RANK_09_ALLHERBS"},
+    {3, 10, "ACW_HERB_RANK_10_BIGGAMEMEATSEASONING"},
+    {3, 10, "ACW_HERB_RANK_10_CRUSTACEANMEATSEASONING"},
+    {3, 10, "ACW_HERB_RANK_10_EXOTICBIRDSEASONING"},
+    {3, 10, "ACW_HERB_RANK_10_FLAKEYFISHSEASONING"},
+    {3, 10, "ACW_HERB_RANK_10_GAMEMEATSEASONING"},
+    {3, 10, "ACW_HERB_RANK_10_GRISTLYMUTTONSEASONING"},
+    {3, 10, "ACW_HERB_RANK_10_MATUREVENISONSEASONING"},
+    {3, 10, "ACW_HERB_RANK_10_PLUMPBIRDSEASONING"},
+    {3, 10, "ACW_HERB_RANK_10_PRIMEBEEFSEASONING"},
+    {3, 10, "ACW_HERB_RANK_10_SUCCULENTFISHSEASONING"},
+    {3, 10, "ACW_HERB_RANK_10_TENDERPORKSEASONING"},
+    // 4: Horseman
+    {4,  1, "ACW_HORSE_RANK_01_RABBITS"},
+    {4,  2, "ACW_HORSE_RANK_02_OBSTACLES"},
+    {4,  3, "ACW_HORSE_RANK_03_TIMEDRIDE"},
+    {4,  4, "ACW_HORSE_RANK_04_LASSODRAG"},
+    {4,  5, "ACW_HORSE_RANK_05_TRAMPLE"},
+    {4,  6, "ACW_HORSE_RANK_06_TIMEDRIDE"},
+    {4,  7, "ACW_HORSE_RANK_07_KILLNODISMOUNT"},
+    {4,  8, "ACW_HORSE_RANK_08_PREDATORS"},
+    {4,  9, "ACW_HORSE_RANK_09_TIMEDRIDE"},
+    {4, 10, "ACW_HORSE_RANK_10_AMERICAN_PAINT"},
+    {4, 10, "ACW_HORSE_RANK_10_AMERICAN_STANDARDBRED"},
+    {4, 10, "ACW_HORSE_RANK_10_APPALOOSA"},
+    {4, 10, "ACW_HORSE_RANK_10_ARABIAN"},
+    {4, 10, "ACW_HORSE_RANK_10_HUNGARIAN"},
+    {4, 10, "ACW_HORSE_RANK_10_KENTUCKY"},
+    {4, 10, "ACW_HORSE_RANK_10_MORGAN"},
+    {4, 10, "ACW_HORSE_RANK_10_MUSTANG"},
+    {4, 10, "ACW_HORSE_RANK_10_NOKOTA"},
+    {4, 10, "ACW_HORSE_RANK_10_TENNESSEE"},
+    // 5: Master Hunter
+    {5,  1, "ACW_HUNT_RANK_01_SKIN"},
+    {5,  2, "ACW_HUNT_RANK_02_RABBITS"},
+    {5,  3, "ACW_HUNT_RANK_03_BINOCULARS"},
+    {5,  4, "ACW_HUNT_RANK_04_CLEANKILL"},
+    {5,  5, "ACW_HUNT_RANK_05_BEAR"},
+    {5,  6, "ACW_HUNT_RANK_06_COUGARKILL"},
+    {5,  6, "ACW_HUNT_RANK_06_COUGARSKIN"},
+    {5,  7, "ACW_HUNT_RANK_07_BAITEDKILLS"},
+    {5,  8, "ACW_HUNT_RANK_08_LOOTEDFISH"},
+    {5,  9, "ACW_HUNT_RANK_09_POSSUM"},
+    {5, 10, "ACW_HUNT_RANK_10_PANTHER"},
+    // 6: Sharpshooter
+    {6,  1, "ACW_SHOT_RANK_01_FLYING"},
+    {6,  2, "ACW_SHOT_RANK_02_ANIMALS"},
+    {6,  3, "ACW_SHOT_RANK_03_TRAIN"},
+    {6,  4, "ACW_SHOT_RANK_04_TOMAHAWK"},
+    {6,  5, "ACW_SHOT_RANK_05_SWITCHING"},
+    {6,  6, "ACW_SHOT_RANK_06_SCOPEDRIFLE"},
+    {6,  7, "ACW_SHOT_RANK_07_HEADSHOTS"},
+    {6,  8, "ACW_SHOT_RANK_08_DISARM"},
+    {6,  9, "ACW_SHOT_RANK_09_DISARM"},
+    {6, 10, "ACW_SHOT_RANK_10_SNIPERRIFLE"},
+    // 7: Survivalist
+    {7,  1, "ACW_SURV_RANK_01_BLUEGILL"},
+    {7,  2, "ACW_SURV_RANK_02_CARCASSDONATION"},
+    {7,  3, "ACW_SURV_RANK_03_VARMINTRIFLE"},
+    {7,  4, "ACW_SURV_RANK_04_DYNAMITEARROW"},
+    {7,  4, "ACW_SURV_RANK_04_FIREARROW"},
+    {7,  4, "ACW_SURV_RANK_04_IMPROVEDARROW"},
+    {7,  4, "ACW_SURV_RANK_04_POISONARROW"},
+    {7,  4, "ACW_SURV_RANK_04_SMALLGAMEARROW"},
+    {7,  5, "ACW_SURV_RANK_05_FISHINGRIVERBOAT"},
+    {7,  5, "ACW_SURV_RANK_05_FISHINGTRACKS"},
+    {7,  6, "ACW_SURV_RANK_06_SCAVENGERKILL"},
+    {7,  7, "ACW_SURV_RANK_07_SMALLGAME"},
+    {7,  8, "ACW_SURV_RANK_08_HOMINGTOMAHAWK"},
+    {7,  8, "ACW_SURV_RANK_08_IMPROVEDTOMAHAWK"},
+    {7,  8, "ACW_SURV_RANK_08_VOLATILEDYNAMITE"},
+    {7,  8, "ACW_SURV_RANK_08_VOLATILEFIREBOTTLE"},
+    {7,  9, "ACW_SURV_RANK_09_HEAVYFISHCAUGHT"},
+    {7, 10, "ACW_SURV_RANK_10_BLUEGILL"},
+    {7, 10, "ACW_SURV_RANK_10_BULLHEADCATFISH"},
+    {7, 10, "ACW_SURV_RANK_10_CHAINPICKEREL"},
+    {7, 10, "ACW_SURV_RANK_10_CHANNELCATFISH"},
+    {7, 10, "ACW_SURV_RANK_10_LAKESTURGEON"},
+    {7, 10, "ACW_SURV_RANK_10_LARGEMOUTHBASS"},
+    {7, 10, "ACW_SURV_RANK_10_LONGNOSEGAR"},
+    {7, 10, "ACW_SURV_RANK_10_MUSKIE"},
+    {7, 10, "ACW_SURV_RANK_10_NORTHERNPIKE"},
+    {7, 10, "ACW_SURV_RANK_10_PERCH"},
+    {7, 10, "ACW_SURV_RANK_10_REDFINPICKEREL"},
+    {7, 10, "ACW_SURV_RANK_10_ROCKBASS"},
+    {7, 10, "ACW_SURV_RANK_10_SMALLMOUTHBASS"},
+    {7, 10, "ACW_SURV_RANK_10_SOCKEYESALMON"},
+    {7, 10, "ACW_SURV_RANK_10_STEELHEADTROUT"},
+    // 8: Weapons Expert
+    {8,  1, "ACW_WEAP_RANK_01_KNIFEKILLS"},
+    {8,  2, "ACW_WEAP_RANK_02_THROWINGKNIFE"},
+    {8,  3, "ACW_WEAP_RANK_03_TOMAHAWK"},
+    {8,  4, "ACW_WEAP_RANK_04_SHOTGUNCRAFTEDAMMO"},
+    {8,  5, "ACW_WEAP_RANK_05_MOUNTED"},
+    {8,  6, "ACW_WEAP_RANK_06_DYNAMITE"},
+    {8,  7, "ACW_WEAP_RANK_07_TOMAHAWK"},
+    {8,  8, "ACW_WEAP_RANK_08_SIDEARM"},
+    {8,  9, "ACW_WEAP_RANK_09_BOW"},
+    {8, 10, "ACW_WEAP_RANK_10_BEAR"}
+};
+
+static void BuildChallengesJson(char* out_buf, size_t out_size) {
+    int pos = snprintf(out_buf, out_size, "{");
+    size_t cat_count = sizeof(CHALLENGE_CATEGORIES) / sizeof(CHALLENGE_CATEGORIES[0]);
+    size_t goal_count = sizeof(CHALLENGE_GOALS) / sizeof(CHALLENGE_GOALS[0]);
+
+    for (size_t c = 0; c < cat_count && pos < (int)out_size - 256; ++c) {
+        uint32_t chal_hash = joaat(CHALLENGE_CATEGORIES[c].root_id);
+        int completed = call_int_1(0x58CB53DB63F84DE9ULL, (UINT64)chal_hash); // STATS::CHAL_GET_NUM_RANKS_COMPLETED
+        int max_ranks = call_int_1(0x58CB53DB63F84DEAULL, (UINT64)chal_hash); // STATS::CHAL_GET_MAX_RANKS
+        if (max_ranks <= 0) max_ranks = 10;
+        if (completed < 0) completed = 0;
+        if (completed > max_ranks) completed = max_ranks;
+        int active_rank = (completed < max_ranks) ? (completed + 1) : 0;
+
+        pos += snprintf(out_buf + pos, out_size - pos,
+                        "%s\"%s\":{\"ranks_completed\":%d,\"max_ranks\":%d,\"active_rank\":%d,\"goals\":[",
+                        c == 0 ? "" : ",",
+                        CHALLENGE_CATEGORIES[c].key,
+                        completed, max_ranks, active_rank);
+
+        if (active_rank > 0) {
+            int first_g = 1;
+            for (size_t g = 0; g < goal_count && pos < (int)out_size - 160; ++g) {
+                if (CHALLENGE_GOALS[g].cat_idx == c && CHALLENGE_GOALS[g].rank == active_rank) {
+                    uint32_t goal_hash = joaat(CHALLENGE_GOALS[g].goal_id);
+                    int prog = call_int_2(0x808712E428F697B8ULL, (UINT64)chal_hash, (UINT64)goal_hash); // CHAL_ACHIEVEMENT_GET_PROGRESS_INT
+                    int is_comp = call_int_2(0x77B97A827739D434ULL, (UINT64)chal_hash, (UINT64)goal_hash); // CHAL_ACHIEVEMENT_IS_COMPLETE
+                    int is_act = call_int_2(0x04DAC3929796EB87ULL, (UINT64)chal_hash, (UINT64)goal_hash); // CHAL_IS_GOAL_ACTIVE
+                    pos += snprintf(out_buf + pos, out_size - pos,
+                                    "%s{\"id\":\"%s\",\"progress\":%d,\"complete\":%s,\"active\":%s}",
+                                    first_g ? "" : ",",
+                                    CHALLENGE_GOALS[g].goal_id,
+                                    prog,
+                                    is_comp ? "true" : "false",
+                                    is_act ? "true" : "false");
+                    first_g = 0;
+                }
+            }
+        }
+        pos += snprintf(out_buf + pos, out_size - pos, "]}");
+    }
+    snprintf(out_buf + pos, out_size - pos, "}");
+}
 
 static const char* LookupWeaponName(uint32_t hash) {
     if (hash == 0 || hash == 0xA2719263U) return "Unarmed";
@@ -594,6 +815,13 @@ static void TickTelemetryOnce() {
             }
             snprintf(inv_json + ipos, sizeof(inv_json) - ipos, "}");
 
+            // Challenges progress (refreshed every ~1s = 5 ticks to keep frame overhead near zero)
+            static char challenges_json[4096] = "{}";
+            if (g_chal_refresh_ticks == 0 || ++g_chal_refresh_ticks >= 5) {
+                BuildChallengesJson(challenges_json, sizeof(challenges_json));
+                g_chal_refresh_ticks = 1;
+            }
+
             snprintf(local_buf, sizeof(local_buf),
                 "{\n"
                 "  \"bridge_active\": true,\n"
@@ -640,7 +868,8 @@ static void TickTelemetryOnce() {
                 "    \"district_hash\": \"0x%08X\",\n"
                 "    \"waypoint_active\": %s,\n"
                 "    \"waypoint_coords\": {\"x\": %.2f, \"y\": %.2f}\n"
-                "  }\n"
+                "  },\n"
+                "  \"challenges\": %s\n"
                 "}",
                 px, py, pz,
                 heading,
@@ -666,7 +895,8 @@ static void TickTelemetryOnce() {
                 temp_c,
                 state_hash, town_hash, district_hash,
                 wp_active ? "true" : "false",
-                wpx, wpy
+                wpx, wpy,
+                challenges_json
             );
     }
 
